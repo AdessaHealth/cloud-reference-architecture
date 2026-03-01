@@ -1,0 +1,148 @@
+openapi: 3.0.3
+info:
+  title: "Adessa Health Interoperability API"
+  description: |
+    This API provides advanced integration capabilities with external Electronic Health Record (EHR) systems such as Epic FHIR API and healthcare clearinghouses.
+    It serves as the backbone for our intelligent Revenue Cycle Management (RCM) platform.
+
+    It facilitates secure data exchange to support features like
+    First-Pass Acceptance Rate (FPAR) and Revenue Cycle Management (RCM).
+    The integration point demonstrated here is the OAuth 2.0 authorization flow required
+    to gain access to patient data within Epic.
+
+    Our primary goal is to achieve a near-100% First-Pass Acceptance Rate (FPAR) for insurance claims. We accomplish this by leveraging a sophisticated, event-driven architecture that includes:
+    - **Pre-submission Claim Scrubbing:** A rules engine that validates claims against a dynamic, payer-specific knowledge base.
+    - **Denial Analysis & Prediction:** A Python microservice utilizing Google Cloud Storage triggers for document processing (e.g., EOBs, 835 files) via Document AI.
+    - **AI-Powered Insights:** We use Vertex AI and the Gemini family of models for summarization of complex denial reasons and semantic search across our claims database to identify and remediate root causes of denials proactively.
+
+    The initial endpoints demonstrate the OAuth 2.0 flow for EHR integration, which is the first step in our data aggregation pipeline.
+  version: "1.0.0"
+  contact:
+    name: "Adessa Health Development Team"
+    url: "https://github.com/cloud-arch-prod/Architecture-Overview"
+
+servers:
+  - url: "https://your-cloud-run-service-url.a.run.app"
+    description: "Production Server (Cloud Run)"
+  - url: "http://localhost:3000"
+    description: "Local Development Server"
+
+tags:
+  - name: "Epic EHR Integration"
+    description: "Endpoints for handling OAuth 2.0 authorization with the Epic FHIR API."
+  - name: "Revenue Cycle Management (RCM)"
+    description: "Endpoints for managing the claims lifecycle and FPAR analytics."
+
+paths:
+  /integrations/epic/auth:
+    get:
+      tags:
+        - "Epic EHR Integration"
+      summary: "Initiate Epic Authorization"
+      description: |
+        Kicks off the OAuth 2.0 authorization code flow. This endpoint redirects the user's browser
+        to the Epic authorization server, where they will be prompted to approve the application's
+        request for access to their health data.
+      operationId: "initiateEpicAuth"
+      responses:
+        '302':
+          description: |
+            A redirect to the Epic authorization URL. The `Location` header will contain the URL
+            for the user to authenticate and authorize the application.
+          headers:
+            Location:
+              schema:
+                type: string
+                format: uri
+              description: The Epic authorization server URL.
+
+  /integrations/epic/auth/callback:
+    get:
+      tags:
+        - "Epic EHR Integration"
+      summary: "Handle Epic Authorization Callback"
+      description: |
+        The callback endpoint that Epic redirects to after the user has granted or denied authorization.
+        It receives an authorization `code` which is then exchanged for an access token.
+      operationId: "handleEpicAuthCallback"
+      parameters:
+        - name: code
+          in: query
+          required: true
+          description: The authorization code issued by the Epic authorization server.
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          description: A random, unguessable string used to prevent CSRF attacks. Must match the state sent in the initial authorization request.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: "Successfully authenticated and received an access token."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Successfully authenticated with Epic!"
+                  accessToken:
+                    type: object
+                    description: "The access token response from Epic. This object contains the token, its type, expiration time, and the scope of access granted."
+                    example:
+                      access_token: "some-long-encrypted-string"
+                      token_type: "Bearer"
+                      expires_in: 3600
+                      scope: "patient/*.read"
+        '500':
+          description: "Internal Server Error. Failed to exchange the authorization code for an access token."
+
+  /rcm/claims/{claimId}/denial-summary:
+    get:
+      tags:
+        - "Revenue Cycle Management (RCM)"
+      summary: "Get AI-Generated Denial Summary"
+      description: |
+        For a claim that has been denied, this endpoint retrieves a concise, human-readable summary of the denial reasons.
+        The summary is generated by a backend process using the Gemini model, which analyzes the raw data from the Explanation of Benefits (EOB) or 835 electronic remittance advice file.
+        This helps billing staff quickly understand and address the issue.
+      operationId: "getDenialSummary"
+      parameters:
+        - name: claimId
+          in: path
+          required: true
+          description: The unique identifier for the claim.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: "Successfully retrieved the denial summary."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DenialSummary'
+
+components:
+  schemas:
+    DenialSummary:
+      type: object
+      properties:
+        claimId:
+          type: string
+          description: "The ID of the claim being summarized."
+        denialCodes:
+          type: array
+          items:
+            type: string
+          example: ["CO-16", "PR-96"]
+        summary:
+          type: string
+          description: "An AI-generated summary explaining the denial in plain English."
+          example: "The claim was denied because the service is not covered under the patient's current plan (PR-96). Additionally, a required piece of information was missing or invalid (CO-16)."
+        recommendedAction:
+          type: string
+          description: "A suggested next step to resolve the denial."
+          example: "Verify patient's benefits and coverage for the rendered service. Check the original claim for missing patient demographic information."
