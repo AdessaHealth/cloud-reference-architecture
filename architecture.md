@@ -22,7 +22,7 @@ graph TD
     subgraph "Google Cloud Platform (GCP)"
         B[Cloud Load Balancer]
         C["Backend API (NestJS on Cloud Run)"]
-        D[Cloud SQL (PostgreSQL)]
+        D["Cloud SQL (PostgreSQL)"]
         E[Secret Manager]
     end
 
